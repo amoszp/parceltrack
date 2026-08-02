@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+:root {
+  /* Base */
+  --bg-base: #0D0D0E;
+  --bg-card: #161618;
+  --bg-card-hover: #1C1C1F;
+  --border: #232326;
+  --border-subtle: #1A1A1D;
+
+  /* Typography */
+  --text-primary: #F1F1F3;
+  --text-secondary: #8B8B96;
+  --text-muted: #4A4A54;
+
+  /* Brand (v2) */
+  --brand: #3447AA;
+  --brand-bg: rgba(52, 71, 170, 0.12);
+  --brand-border: rgba(52, 71, 170, 0.3);
+  --brand-tint: #FBEAEB;
+
+  /* Status colours (semantic only — NOT used on progress bars) */
+  --color-transit:  #FBBF24;
+  --color-delivery: #F97316;
+  --color-done:     #10B981;
+  --color-issue:    #EF4444;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+  height: 100%;
+}
+
+/* Scroll container — no scrollbar */
+.scroll-area {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.scroll-area::-webkit-scrollbar { display: none; }
+
+/* Card baseline */
+.glass-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+/* Progress bar shimmer */
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.progress-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.22) 50%, transparent 100%);
+  animation: shimmer 2s infinite;
+}
+
+/* Bottom nav safe area */
+.bottom-nav {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Input focus ring — brand blue */
+.input-glow:focus-within {
+  box-shadow: 0 0 0 1px rgba(52, 71, 170, 0.4), 0 0 18px rgba(52, 71, 170, 0.08);
+  border-color: rgba(52, 71, 170, 0.4) !important;
+}
+
+/* Pulse dot (out for delivery) */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.45; transform: scale(0.8); }
+}
+.pulse-dot { animation: pulse-dot 1.8s ease-in-out infinite; }
+
+/* Slide up entry */
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.slide-up { animation: slide-up 0.22s ease-out both; }
+
+/* Spin utility (Loader2) */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin { animation: spin 0.75s linear infinite; }
