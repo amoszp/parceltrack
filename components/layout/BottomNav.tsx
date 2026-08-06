@@ -17,7 +17,7 @@ const TABS = [
 export function BottomNav({ active, onChange }: Props) {
   return (
     <div
-      className="bottom-nav fixed bottom-0 left-0 right-0 z-50 px-6 pt-3 pb-2"
+      className="bottom-nav fixed bottom-0 left-0 right-0 z-30 px-6 pt-3 pb-2"
       style={{
         background: 'linear-gradient(to top, rgba(13,13,14,0.98) 60%, transparent)',
       }}

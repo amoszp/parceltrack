@@ -21,14 +21,16 @@ export interface Order {
   trackingNumber: string;
   carrier: string;
   status: OrderStatus;
-  progress: number; // 0–100
-  estimatedDelivery?: string;
+  progress: number;
+  estimatedDelivery?: string;       // display string e.g. "Dec 22" or "Today"
+  estimatedDeliveryDate?: string;   // ISO date string for the date picker
   lastUpdate: string;
   statusHistory: StatusEvent[];
   createdAt: string;
   deliveredAt?: string;
+  archivedAt?: string;              // set when moved to history from active
   notes?: string;
-  tags?: string[];
+  isArchived?: boolean;             // true = in History, permanent delete allowed
 }
 
 export interface SuggestedOrder {

@@ -5,13 +5,14 @@ import { Order, SuggestedOrder, StatusFilter, MetricFilter } from '@/types';
 interface OrdersState {
   orders: Order[];
   suggested: SuggestedOrder[];
-  platforms: string[];               // user-accumulated platform history
+  platforms: string[];
   statusFilter: StatusFilter;
   metricFilter: MetricFilter;
   searchQuery: string;
   addOrder: (order: Order) => void;
   updateOrder: (id: string, patch: Partial<Order>) => void;
-  removeOrder: (id: string) => void;
+  archiveOrder: (id: string) => void;      // active → history (soft delete)
+  purgeOrder: (id: string) => void;        // history → gone (hard delete)
   acceptSuggested: (id: string, patch?: Partial<Order>) => void;
   dismissSuggested: (id: string) => void;
   setStatusFilter: (f: StatusFilter) => void;
@@ -19,6 +20,10 @@ interface OrdersState {
   setSearchQuery: (q: string) => void;
   addPlatform: (p: string) => void;
 }
+
+const today = new Date().toISOString().split('T')[0];
+const dec22  = `${new Date().getFullYear()}-12-22`;
+const dec28  = `${new Date().getFullYear()}-12-28`;
 
 const SAMPLE_ORDERS: Order[] = [
   {
@@ -30,11 +35,11 @@ const SAMPLE_ORDERS: Order[] = [
     status: 'out_for_delivery',
     progress: 85,
     estimatedDelivery: 'Today',
+    estimatedDeliveryDate: today,
     lastUpdate: '2 hours ago',
     statusHistory: [],
     createdAt: new Date().toISOString(),
     notes: '',
-    tags: [],
   },
   {
     id: '2',
@@ -45,11 +50,11 @@ const SAMPLE_ORDERS: Order[] = [
     status: 'in_transit',
     progress: 55,
     estimatedDelivery: 'Dec 22',
+    estimatedDeliveryDate: dec22,
     lastUpdate: '6 hours ago',
     statusHistory: [],
     createdAt: new Date().toISOString(),
     notes: '',
-    tags: [],
   },
   {
     id: '3',
@@ -60,11 +65,11 @@ const SAMPLE_ORDERS: Order[] = [
     status: 'processed',
     progress: 10,
     estimatedDelivery: 'Dec 28',
+    estimatedDeliveryDate: dec28,
     lastUpdate: '1 day ago',
     statusHistory: [],
     createdAt: new Date().toISOString(),
     notes: '',
-    tags: [],
   },
   {
     id: '4',
@@ -79,7 +84,6 @@ const SAMPLE_ORDERS: Order[] = [
     statusHistory: [],
     createdAt: new Date().toISOString(),
     notes: 'Customs hold at Madrid',
-    tags: ['customs'],
   },
   {
     id: '5',
@@ -94,6 +98,8 @@ const SAMPLE_ORDERS: Order[] = [
     statusHistory: [],
     createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
     deliveredAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+    isArchived: true,
+    archivedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
   },
 ];
 
@@ -111,6 +117,19 @@ const SAMPLE_SUGGESTED: SuggestedOrder[] = [
 
 const INITIAL_PLATFORMS = ['Amazon', 'AliExpress', 'Shein', 'Nike', 'Zara', 'Apple', 'eBay', 'El Corte Inglés'];
 
+/** Format ISO date → human display string */
+export function formatDeliveryDate(iso?: string): string {
+  if (!iso) return 'Unknown';
+  const d = new Date(iso);
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  if (iso.startsWith(todayStr)) return 'Today';
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (iso.startsWith(tomorrow.toISOString().split('T')[0])) return 'Tomorrow';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 export const useOrdersStore = create<OrdersState>()(
   persist(
     (set, get) => ({
@@ -123,7 +142,6 @@ export const useOrdersStore = create<OrdersState>()(
 
       addOrder: (order) => {
         set((s) => ({ orders: [order, ...s.orders] }));
-        // Save platform if new
         if (order.platform && order.platform !== 'Unknown') {
           get().addPlatform(order.platform);
         }
@@ -134,7 +152,18 @@ export const useOrdersStore = create<OrdersState>()(
           orders: s.orders.map((o) => (o.id === id ? { ...o, ...patch } : o)),
         })),
 
-      removeOrder: (id) =>
+      // Soft delete: move to history
+      archiveOrder: (id) =>
+        set((s) => ({
+          orders: s.orders.map((o) =>
+            o.id === id
+              ? { ...o, isArchived: true, archivedAt: new Date().toISOString() }
+              : o
+          ),
+        })),
+
+      // Hard delete: permanent removal (only from history)
+      purgeOrder: (id) =>
         set((s) => ({ orders: s.orders.filter((o) => o.id !== id) })),
 
       acceptSuggested: (id, patch) => {
@@ -153,7 +182,6 @@ export const useOrdersStore = create<OrdersState>()(
           statusHistory: [],
           createdAt: new Date().toISOString(),
           notes: '',
-          tags: [],
           ...patch,
         };
         set({
@@ -177,6 +205,6 @@ export const useOrdersStore = create<OrdersState>()(
           platforms: s.platforms.includes(p) ? s.platforms : [...s.platforms, p],
         })),
     }),
-    { name: 'parceltrack-orders-v2' }
+    { name: 'parceltrack-orders-v3' }
   )
 );

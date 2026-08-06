@@ -69,7 +69,6 @@ export function AddOrderModal({ open, onClose }: Props) {
       statusHistory: [],
       createdAt: new Date().toISOString(),
       notes: '',
-      tags: [],
     };
 
     addOrder(newOrder);
@@ -91,7 +90,7 @@ export function AddOrderModal({ open, onClose }: Props) {
         <>
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50"
+            className="fixed inset-0 z-60"
             style={{ background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)' }}
             onClick={handleClose}
           />
@@ -99,7 +98,7 @@ export function AddOrderModal({ open, onClose }: Props) {
           <motion.div
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 340, damping: 36 }}
-            className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl p-6 max-w-lg mx-auto"
+            className="fixed bottom-0 left-0 right-0 z-60 rounded-t-3xl p-6 max-w-lg mx-auto"
             style={{
               background: 'var(--bg-card)',
               border: '1px solid var(--border)',

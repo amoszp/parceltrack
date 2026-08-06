@@ -1,9 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Trash2, Save, AlertTriangle } from 'lucide-react';
+import { X, Save } from 'lucide-react';
 import { Order, OrderStatus } from '@/types';
-import { useOrdersStore } from '@/lib/store/orders';
+import { useOrdersStore, formatDeliveryDate } from '@/lib/store/orders';
 import { STATUS_CONFIG, STATUS_PROGRESS } from '@/lib/utils/status';
 import { PlatformInput } from '@/components/ui/PlatformInput';
 
@@ -16,17 +16,45 @@ interface Props {
 const STATUS_OPTIONS: OrderStatus[] = ['processed', 'in_transit', 'out_for_delivery', 'delivered', 'issue'];
 
 export function EditOrderModal({ order, open, onClose }: Props) {
-  const { updateOrder, removeOrder } = useOrdersStore();
+  const { updateOrder } = useOrdersStore();
+
+  // Form state — always synced from order when modal opens
   const [name, setName] = useState(order.name);
   const [platform, setPlatform] = useState(order.platform);
   const [carrier, setCarrier] = useState(order.carrier);
   const [trackingNumber, setTracking] = useState(order.trackingNumber);
   const [status, setStatus] = useState<OrderStatus>(order.status);
+  const [estimatedDeliveryDate, setEDD] = useState(order.estimatedDeliveryDate ?? '');
   const [notes, setNotes] = useState(order.notes ?? '');
-  const [tags, setTags] = useState((order.tags ?? []).join(', '));
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const handleSave = () => {
+  // Unsaved-changes guard state
+  const [confirmClose, setConfirmClose] = useState(false);
+
+  // Reset local form whenever the modal opens with a (possibly updated) order
+  useEffect(() => {
+    if (open) {
+      setName(order.name);
+      setPlatform(order.platform);
+      setCarrier(order.carrier);
+      setTracking(order.trackingNumber);
+      setStatus(order.status);
+      setEDD(order.estimatedDeliveryDate ?? '');
+      setNotes(order.notes ?? '');
+      setConfirmClose(false);
+    }
+  }, [open, order]);
+
+  const isDirty =
+    name !== order.name ||
+    platform !== order.platform ||
+    carrier !== order.carrier ||
+    trackingNumber !== order.trackingNumber ||
+    status !== order.status ||
+    estimatedDeliveryDate !== (order.estimatedDeliveryDate ?? '') ||
+    notes !== (order.notes ?? '');
+
+  const handleSave = useCallback(() => {
+    const deliveryDisplay = formatDeliveryDate(estimatedDeliveryDate || undefined);
     updateOrder(order.id, {
       name: name.trim() || order.name,
       platform: platform.trim() || order.platform,
@@ -34,19 +62,26 @@ export function EditOrderModal({ order, open, onClose }: Props) {
       trackingNumber: trackingNumber.trim() || order.trackingNumber,
       status,
       progress: STATUS_PROGRESS[status],
+      estimatedDeliveryDate: estimatedDeliveryDate || undefined,
+      estimatedDelivery: estimatedDeliveryDate ? deliveryDisplay : order.estimatedDelivery,
       notes: notes.trim(),
-      tags: tags.split(',').map(t => t.trim()).filter(Boolean),
       lastUpdate: 'Just now',
     });
     onClose();
+  }, [name, platform, carrier, trackingNumber, status, estimatedDeliveryDate, notes, order, updateOrder, onClose]);
+
+  // Attempt to close — guard if dirty
+  const handleCloseAttempt = () => {
+    if (isDirty) {
+      setConfirmClose(true);
+    } else {
+      onClose();
+    }
   };
 
-  const handleDelete = () => {
-    removeOrder(order.id);
-    onClose();
-  };
+  const handleBackdropClick = () => handleCloseAttempt();
 
-  const inputStyle = {
+  const inputStyle: React.CSSProperties = {
     background: 'rgba(255,255,255,0.04)',
     border: '1px solid var(--border)',
     color: 'var(--text-primary)',
@@ -55,50 +90,84 @@ export function EditOrderModal({ order, open, onClose }: Props) {
     width: '100%',
     padding: '10px 12px',
     fontSize: '14px',
-  } as React.CSSProperties;
+  };
 
   return (
     <AnimatePresence>
       {open && (
         <>
+          {/* Backdrop */}
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-60"
             style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
-            onClick={onClose}
+            onClick={handleBackdropClick}
           />
 
+          {/* Sheet */}
           <motion.div
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
+            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 340, damping: 36 }}
-            className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl max-w-lg mx-auto"
+            className="fixed bottom-0 left-0 right-0 z-60 rounded-t-3xl max-w-lg mx-auto"
             style={{
               background: 'var(--bg-card)',
               border: '1px solid var(--border)',
               borderBottom: 'none',
-              maxHeight: '90dvh',
+              maxHeight: '92dvh',
               display: 'flex',
               flexDirection: 'column',
             }}
             onClick={e => e.stopPropagation()}
           >
-            {/* Handle */}
+            {/* Drag handle */}
             <div className="flex-shrink-0 pt-3 pb-1 flex justify-center">
               <div className="w-10 h-1 rounded-full" style={{ background: 'var(--border)' }} />
             </div>
+
+            {/* ── Unsaved changes confirmation ── */}
+            <AnimatePresence>
+              {confirmClose && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                  className="flex-shrink-0 mx-6 mt-2 mb-1 rounded-2xl p-4"
+                  style={{ background: 'rgba(52,71,170,0.08)', border: '1px solid rgba(52,71,170,0.25)' }}
+                >
+                  <p className="text-sm font-semibold text-center mb-1" style={{ color: 'var(--text-primary)' }}>
+                    Save your changes?
+                  </p>
+                  <p className="text-xs text-center mb-3" style={{ color: 'var(--text-muted)' }}>
+                    You've made edits that haven't been saved yet.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setConfirmClose(false)}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-medium"
+                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                    >
+                      Keep editing
+                    </button>
+                    <button
+                      onClick={handleSave}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+                      style={{ background: '#3447AA', color: '#fff' }}
+                    >
+                      Save &amp; close
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Header */}
             <div className="flex-shrink-0 flex items-center justify-between px-6 py-3">
               <div>
                 <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>Edit order</h2>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>All changes are saved locally</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  {isDirty ? '● Unsaved changes' : 'All changes saved locally'}
+                </p>
               </div>
               <button
-                onClick={onClose}
+                onClick={handleCloseAttempt}
                 className="w-8 h-8 rounded-full flex items-center justify-center"
                 style={{ background: 'rgba(255,255,255,0.06)' }}
               >
@@ -108,22 +177,28 @@ export function EditOrderModal({ order, open, onClose }: Props) {
 
             {/* Scrollable form */}
             <div className="flex-1 overflow-y-auto scroll-area px-6 pb-2 space-y-3">
-              {/* Name */}
               <Field label="Order name">
-                <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Running Shoes" />
+                <input
+                  style={inputStyle}
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="e.g. Running Shoes"
+                />
               </Field>
 
-              {/* Platform */}
               <Field label="Platform / Store">
                 <PlatformInput value={platform} onChange={setPlatform} />
               </Field>
 
-              {/* Carrier */}
               <Field label="Carrier">
-                <input style={inputStyle} value={carrier} onChange={e => setCarrier(e.target.value)} placeholder="e.g. DHL, UPS, Correos" />
+                <input
+                  style={inputStyle}
+                  value={carrier}
+                  onChange={e => setCarrier(e.target.value)}
+                  placeholder="e.g. DHL, UPS, Correos"
+                />
               </Field>
 
-              {/* Tracking */}
               <Field label="Tracking number">
                 <input
                   style={{ ...inputStyle, fontFamily: 'monospace' }}
@@ -133,7 +208,18 @@ export function EditOrderModal({ order, open, onClose }: Props) {
                 />
               </Field>
 
-              {/* Status override */}
+              <Field label="Estimated delivery date">
+                <input
+                  type="date"
+                  style={{
+                    ...inputStyle,
+                    colorScheme: 'dark',
+                  }}
+                  value={estimatedDeliveryDate}
+                  onChange={e => setEDD(e.target.value)}
+                />
+              </Field>
+
               <Field label="Status (manual override)">
                 <div className="flex flex-wrap gap-1.5">
                   {STATUS_OPTIONS.map(s => {
@@ -157,7 +243,6 @@ export function EditOrderModal({ order, open, onClose }: Props) {
                 </div>
               </Field>
 
-              {/* Notes */}
               <Field label="Notes (optional)">
                 <textarea
                   style={{ ...inputStyle, resize: 'none', height: '72px' }}
@@ -166,60 +251,26 @@ export function EditOrderModal({ order, open, onClose }: Props) {
                   placeholder="Customs hold, leave at door, etc."
                 />
               </Field>
-
-              {/* Tags */}
-              <Field label="Tags (comma separated)">
-                <input style={inputStyle} value={tags} onChange={e => setTags(e.target.value)} placeholder="e.g. gift, urgent, customs" />
-              </Field>
             </div>
 
-            {/* Footer actions */}
-            <div className="flex-shrink-0 px-6 pt-3 pb-6 space-y-2" style={{ paddingBottom: 'max(24px, env(safe-area-inset-bottom))' }}>
-              {showDeleteConfirm ? (
-                <div className="rounded-2xl p-3 space-y-2" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                  <p className="text-sm text-center font-medium" style={{ color: '#EF4444' }}>
-                    Delete this order permanently?
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setShowDeleteConfirm(false)}
-                      className="flex-1 py-2 rounded-xl text-sm font-medium"
-                      style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleDelete}
-                      className="flex-1 py-2 rounded-xl text-sm font-semibold"
-                      style={{ background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setShowDeleteConfirm(true)}
-                    className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 transition-colors"
-                    style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}
-                  >
-                    <Trash2 size={15} style={{ color: '#EF4444' }} />
-                  </button>
-                  <button
-                    onClick={handleSave}
-                    className="flex-1 py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all active:scale-98"
-                    style={{
-                      background: '#3447AA',
-                      color: '#fff',
-                      boxShadow: '0 0 20px rgba(52,71,170,0.3)',
-                    }}
-                  >
-                    <Save size={15} />
-                    Save changes
-                  </button>
-                </div>
-              )}
+            {/* Footer */}
+            <div
+              className="flex-shrink-0 px-6 pt-3"
+              style={{ paddingBottom: 'max(24px, env(safe-area-inset-bottom))' }}
+            >
+              <button
+                onClick={handleSave}
+                className="w-full py-3.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all active:scale-98"
+                style={{
+                  background: isDirty ? '#3447AA' : 'rgba(255,255,255,0.05)',
+                  color: isDirty ? '#fff' : 'var(--text-muted)',
+                  border: isDirty ? 'none' : '1px solid var(--border)',
+                  boxShadow: isDirty ? '0 0 20px rgba(52,71,170,0.28)' : 'none',
+                }}
+              >
+                <Save size={15} />
+                {isDirty ? 'Save changes' : 'No changes'}
+              </button>
             </div>
           </motion.div>
         </>
@@ -231,7 +282,9 @@ export function EditOrderModal({ order, open, onClose }: Props) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-medium mb-1.5 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</p>
+      <p className="text-xs font-medium mb-1.5 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </p>
       {children}
     </div>
   );

@@ -23,13 +23,17 @@ export default function HomePage() {
     setActiveTab(tab);
   };
 
-  const activeCount = orders.filter(o => o.status !== 'delivered').length;
-  const issueCount  = orders.filter(o => o.status === 'issue').length;
-  const todayCount  = orders.filter(o => o.estimatedDelivery === 'Today' || o.status === 'out_for_delivery').length;
+  // Active = not archived, not delivered (unless explicitly archived)
+  const activeOrders  = orders.filter(o => !o.isArchived && o.status !== 'delivered');
+  const historyOrders = orders.filter(o => o.isArchived || o.status === 'delivered');
+
+  const activeCount = activeOrders.length;
+  const issueCount  = activeOrders.filter(o => o.status === 'issue').length;
+  const todayCount  = activeOrders.filter(o => o.estimatedDelivery === 'Today' || o.status === 'out_for_delivery').length;
 
   const handleMetricClick = (metric: MetricFilter) => {
     if (metricFilter === metric) {
-      setMetricFilter(null); // toggle off
+      setMetricFilter(null);
     } else {
       setMetricFilter(metric);
       setStatusFilter('all');
@@ -37,46 +41,18 @@ export default function HomePage() {
   };
 
   const METRIC_CARDS = [
-    {
-      id: 'active' as MetricFilter,
-      label: 'Active',
-      value: activeCount,
-      color: BRAND.primary,
-      activeBg: BRAND.primaryBg,
-      activeBorder: BRAND.primaryBorder,
-    },
-    {
-      id: 'issues' as MetricFilter,
-      label: 'Issues',
-      value: issueCount,
-      color: '#EF4444',
-      activeBg: 'rgba(239,68,68,0.1)',
-      activeBorder: 'rgba(239,68,68,0.25)',
-    },
-    {
-      id: 'today' as MetricFilter,
-      label: 'Today',
-      value: todayCount,
-      color: '#F97316',
-      activeBg: 'rgba(249,115,22,0.1)',
-      activeBorder: 'rgba(249,115,22,0.25)',
-    },
+    { id: 'active' as MetricFilter, label: 'Active',  value: activeCount, color: BRAND.primary, activeBg: BRAND.primaryBg, activeBorder: BRAND.primaryBorder },
+    { id: 'issues' as MetricFilter, label: 'Issues',  value: issueCount,  color: '#EF4444', activeBg: 'rgba(239,68,68,0.1)', activeBorder: 'rgba(239,68,68,0.25)' },
+    { id: 'today'  as MetricFilter, label: 'Today',   value: todayCount,  color: '#F97316', activeBg: 'rgba(249,115,22,0.1)', activeBorder: 'rgba(249,115,22,0.25)' },
   ];
 
   const filteredOrders = useMemo(() => {
-    let list = orders.filter(o =>
-      activeTab === 'history' ? o.status === 'delivered' : o.status !== 'delivered'
-    );
+    let list = activeTab === 'history' ? historyOrders : activeOrders;
 
-    // Metric filter takes priority over status filter
     if (metricFilter && activeTab !== 'history') {
-      if (metricFilter === 'active') {
-        list = list; // already filtered above
-      } else if (metricFilter === 'issues') {
-        list = list.filter(o => o.status === 'issue');
-      } else if (metricFilter === 'today') {
-        list = list.filter(o => o.estimatedDelivery === 'Today' || o.status === 'out_for_delivery');
-      }
+      if (metricFilter === 'issues') list = list.filter(o => o.status === 'issue');
+      else if (metricFilter === 'today') list = list.filter(o => o.estimatedDelivery === 'Today' || o.status === 'out_for_delivery');
+      // 'active' = already the full activeOrders list
     } else if (statusFilter !== 'all' && activeTab !== 'history') {
       list = list.filter(o => o.status === statusFilter);
     }
@@ -98,11 +74,11 @@ export default function HomePage() {
       <Header title="ParcelTrack" />
 
       <div className="flex-1 overflow-hidden flex flex-col">
-        {/* Top controls */}
+        {/* Controls */}
         <div className="px-4 pb-3 space-y-3">
           <SearchBar onAdd={() => setAddOpen(true)} />
 
-          {/* Metric cards — interactive filters */}
+          {/* Metric filter cards */}
           <div className="flex gap-2">
             {METRIC_CARDS.map(card => {
               const isActive = metricFilter === card.id;
@@ -117,16 +93,10 @@ export default function HomePage() {
                     boxShadow: isActive ? `0 0 14px ${card.activeBg}` : undefined,
                   }}
                 >
-                  <p
-                    className="text-lg font-bold leading-none"
-                    style={{ color: isActive ? card.color : 'var(--text-primary)' }}
-                  >
+                  <p className="text-lg font-bold leading-none" style={{ color: isActive ? card.color : 'var(--text-primary)' }}>
                     {card.value}
                   </p>
-                  <p
-                    className="text-[10px] uppercase tracking-wider mt-1 font-medium"
-                    style={{ color: isActive ? card.color : 'var(--text-muted)' }}
-                  >
+                  <p className="text-[10px] uppercase tracking-wider mt-1 font-medium" style={{ color: isActive ? card.color : 'var(--text-muted)' }}>
                     {card.label}
                   </p>
                 </button>
@@ -145,7 +115,7 @@ export default function HomePage() {
                   color: METRIC_CARDS.find(c => c.id === metricFilter)?.color,
                 }}
               >
-                Filtered by: {metricFilter}
+                Filtered: {metricFilter}
               </div>
               <button
                 onClick={() => setMetricFilter(null)}
@@ -160,7 +130,7 @@ export default function HomePage() {
 
         {/* Scrollable list */}
         <div className="flex-1 scroll-area px-4 pb-32 space-y-3">
-          {/* Suggestions */}
+          {/* Suggestions (active tab only) */}
           {activeTab === 'list' && suggested.length > 0 && (
             <AnimatePresence>
               {suggested.map(s => <SuggestionCard key={s.id} suggestion={s} />)}
@@ -170,12 +140,18 @@ export default function HomePage() {
           {/* Section header */}
           <div className="flex items-center gap-2 py-0.5">
             <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
-              {activeTab === 'history' ? 'Delivered' : `${filteredOrders.length} shipment${filteredOrders.length !== 1 ? 's' : ''}`}
+              {activeTab === 'history'
+                ? `${filteredOrders.length} archived`
+                : `${filteredOrders.length} shipment${filteredOrders.length !== 1 ? 's' : ''}`}
             </p>
             <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
+            {activeTab === 'history' && (
+              <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Delete removes permanently
+              </p>
+            )}
           </div>
 
-          {/* Orders */}
           {filteredOrders.length === 0 ? (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -189,17 +165,24 @@ export default function HomePage() {
               </div>
               <div className="text-center">
                 <p className="font-semibold text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  {activeTab === 'history' ? 'No delivered orders yet' : 'No shipments here'}
+                  {activeTab === 'history' ? 'No archived orders' : 'No shipments here'}
                 </p>
                 <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                  {activeTab === 'history' ? 'Delivered packages will appear here' : 'Tap + to start tracking a package'}
+                  {activeTab === 'history'
+                    ? 'Archived and delivered orders appear here'
+                    : 'Tap + to start tracking a package'}
                 </p>
               </div>
             </motion.div>
           ) : (
             <div className="space-y-3">
               {filteredOrders.map((order, i) => (
-                <OrderCard key={order.id} order={order} index={i} />
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  index={i}
+                  inHistory={activeTab === 'history'}
+                />
               ))}
             </div>
           )}
