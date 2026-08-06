@@ -5,7 +5,6 @@ import { Package, Truck, MapPin, CheckCircle, AlertTriangle, ChevronDown, Clock,
 import { Order, OrderStatus } from '@/types';
 import { STATUS_CONFIG } from '@/lib/utils/status';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { ProgressBar } from '@/components/ui/ProgressBar';
 import { EditOrderModal } from '@/components/orders/EditOrderModal';
 
 interface Props {
@@ -89,9 +88,6 @@ export function OrderCard({ order, index }: Props) {
               </motion.div>
             </div>
           </div>
-
-          {/* Progress bar */}
-          <ProgressBar progress={order.progress} status={order.status} />
 
           {/* Bottom meta */}
           <div className="flex items-center justify-between mt-3">
