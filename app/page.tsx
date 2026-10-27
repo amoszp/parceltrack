@@ -145,15 +145,14 @@ export default function HomePage() {
             {!inHistory && activeOrders.length > 0 && <FilterTabs counts={counts} />}
           </div>
 
-          <ul className="space-y-3">
+          {/* One list per tab: switching tabs remounts it instead of animating cards across */}
+          <ul key={inHistory ? 'history' : 'list'} className="space-y-3">
             <AnimatePresence initial={false}>
               {!inHistory && !searchQuery && suggested.map(s => <SuggestionCard key={s.id} suggestion={s} />)}
             </AnimatePresence>
-            <AnimatePresence initial={false} mode="popLayout">
-              {visible.map((order, i) => (
-                <OrderCard key={order.id} order={order} index={i} onOpen={setSelectedId} />
-              ))}
-            </AnimatePresence>
+            {visible.map((order, i) => (
+              <OrderCard key={order.id} order={order} index={i} onOpen={setSelectedId} />
+            ))}
           </ul>
 
           {visible.length === 0 && (

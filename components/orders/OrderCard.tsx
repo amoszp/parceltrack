@@ -1,12 +1,13 @@
 'use client';
 import { useState } from 'react';
-import { motion } from 'framer-motion';
 import { Copy, Check, ExternalLink, AlertCircle, StickyNote } from 'lucide-react';
 import { Order } from '@/types';
 import { STATUS_CONFIG } from '@/lib/utils/status';
 import { etaInfo, type EtaTone } from '@/lib/utils/dates';
 import { carrierTrackingUrl } from '@/lib/tracking/carriers';
 import { StatusIcon } from '@/components/ui/StatusBadge';
+import { StatusPicker } from '@/components/orders/StatusPicker';
+import { useOrdersStore } from '@/lib/store/orders';
 
 interface Props {
   order: Order;
@@ -24,6 +25,8 @@ const ETA_COLOR: Record<EtaTone, string> = {
 
 export function OrderCard({ order, index, onOpen }: Props) {
   const [copied, setCopied] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const setStatus = useOrdersStore((s) => s.setStatus);
   const cfg = STATUS_CONFIG[order.status];
   const eta = etaInfo(order);
   const meta = [order.platform, order.carrier].filter(v => v && v !== 'Unknown').join(' · ');
@@ -40,13 +43,9 @@ export function OrderCard({ order, index, onOpen }: Props) {
   };
 
   return (
-    <motion.li
-      layout="position"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.15 } }}
-      transition={{ delay: Math.min(index, 8) * 0.03, duration: 0.22, ease: 'easeOut' }}
-      className="list-none"
+    <li
+      className="list-none relative card-enter"
+      style={{ zIndex: pickerOpen ? 20 : undefined, animationDelay: `${Math.min(index, 8) * 30}ms` }}
     >
       <div
         role="button"
@@ -68,7 +67,7 @@ export function OrderCard({ order, index, onOpen }: Props) {
             </div>
             <div className="flex items-center justify-between gap-3 mt-0.5">
               <p className="text-[13px] truncate" style={{ color: 'var(--text-secondary)' }}>{meta || 'No store or carrier yet'}</p>
-              <p className="text-[12px] font-medium whitespace-nowrap" style={{ color: cfg.color }}>{cfg.short}</p>
+              <StatusPicker status={order.status} onChange={(st) => setStatus(order.id, st)} onOpenChange={setPickerOpen} />
             </div>
           </div>
         </div>
@@ -113,6 +112,6 @@ export function OrderCard({ order, index, onOpen }: Props) {
           </p>
         )}
       </div>
-    </motion.li>
+    </li>
   );
 }

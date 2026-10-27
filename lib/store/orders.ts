@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { Order, SuggestedOrder, StatusFilter } from '@/types';
-import { STATUS_PROGRESS } from '@/lib/utils/status';
+import { Order, OrderStatus, SuggestedOrder, StatusFilter } from '@/types';
+import { STATUS_CONFIG, STATUS_PROGRESS } from '@/lib/utils/status';
 import { normalizeTracking, validateTracking } from '@/lib/utils/validation';
 import { api, ApiError } from '@/lib/api';
 
@@ -36,6 +36,7 @@ interface OrdersState {
   reload: () => void;
   addOrder: (order: Order) => void;
   updateOrder: (id: string, patch: Partial<Order>) => void;
+  setStatus: (id: string, status: OrderStatus) => void;   // quick change from the list, with Undo
   archiveOrder: (id: string) => void;      // active → history
   restoreOrder: (id: string) => void;      // history → active
   purgeOrder: (id: string) => void;        // gone (undo via toast)
@@ -195,6 +196,13 @@ export const useOrdersStore = create<OrdersState>()((set, get) => {
         }
         return next;
       }),
+
+    setStatus: (id, status) => {
+      const before = get().orders.find((o) => o.id === id);
+      if (!before || before.status === status) return;
+      get().updateOrder(id, { status });
+      get().showToast(`Status → ${STATUS_CONFIG[status].label}`, () => change(id, () => before));
+    },
 
     archiveOrder: (id) => change(id, (o) => ({ ...o, isArchived: true, archivedAt: new Date().toISOString() })),
 

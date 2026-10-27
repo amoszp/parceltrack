@@ -180,3 +180,27 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Status label on cards: small visually, 44px to the finger */
+.status-trigger {
+  position: relative;
+  transition-property: background-color;
+  transition-duration: 150ms;
+}
+.status-trigger::before {
+  content: '';
+  position: absolute;
+  inset: -8px -2px;
+}
+@media (hover: hover) {
+  .status-trigger:hover { background: rgba(255, 255, 255, 0.06); }
+}
+.status-trigger[aria-expanded='true'] { background: rgba(255, 255, 255, 0.08); }
+.status-option { transition: background-color 120ms ease-out; }
+
+/* Card entrance: CSS, so a card is never left invisible if JS animation stalls */
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.card-enter { animation: card-in 220ms ease-out both; }
