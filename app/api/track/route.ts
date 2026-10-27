@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { lookupTracking } from '@/lib/tracking/api';
-import { normalizeTracking, validateTracking } from '@/lib/utils/validation';
+import { validateTracking } from '@/lib/utils/validation';
 
 export async function POST(req: NextRequest) {
   try {
     const { trackingNumber, force } = await req.json();
 
-    if (!trackingNumber?.trim()) {
+    if (typeof trackingNumber !== 'string' || !trackingNumber.trim()) {
       return NextResponse.json({ error: 'Tracking number required' }, { status: 400 });
     }
 
-    const normalized = normalizeTracking(trackingNumber);
-    const validation = validateTracking(normalized);
+    const validation = validateTracking(trackingNumber);
 
-    // Block invalid numbers unless force flag is set
+    // Block mistyped numbers unless the user chose "Add anyway"
     if (!validation.valid && !force) {
       return NextResponse.json(
         {
@@ -26,7 +25,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await lookupTracking(normalized);
+    const result = await lookupTracking(validation.normalized);
     return NextResponse.json({ ...result, detectedCarrier: validation.carrier ?? result.carrier });
   } catch (err) {
     console.error('[track]', err);

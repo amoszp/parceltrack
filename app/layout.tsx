@@ -18,15 +18,13 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: 'cover',
-  themeColor: '#0D0D0E',
+  themeColor: '#0B0D12',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body style={{ background: '#0D0D0E', minHeight: '100dvh' }}>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

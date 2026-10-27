@@ -1,210 +1,166 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Order, SuggestedOrder, StatusFilter, MetricFilter } from '@/types';
+import { Order, SuggestedOrder, StatusFilter } from '@/types';
+import { STATUS_PROGRESS } from '@/lib/utils/status';
+import { normalizeTracking, validateTracking } from '@/lib/utils/validation';
+
+export interface Toast {
+  id: number;
+  message: string;
+  undo?: () => void;
+}
 
 interface OrdersState {
   orders: Order[];
   suggested: SuggestedOrder[];
   platforms: string[];
   statusFilter: StatusFilter;
-  metricFilter: MetricFilter;
   searchQuery: string;
+  toast: Toast | null;
   addOrder: (order: Order) => void;
   updateOrder: (id: string, patch: Partial<Order>) => void;
-  archiveOrder: (id: string) => void;      // active → history (soft delete)
-  purgeOrder: (id: string) => void;        // history → gone (hard delete)
+  archiveOrder: (id: string) => void;      // active → history
+  restoreOrder: (id: string) => void;      // history → active
+  purgeOrder: (id: string) => void;        // gone (undo via toast)
+  findByTracking: (trackingNumber: string, exceptId?: string) => Order | undefined;
   acceptSuggested: (id: string, patch?: Partial<Order>) => void;
   dismissSuggested: (id: string) => void;
   setStatusFilter: (f: StatusFilter) => void;
-  setMetricFilter: (f: MetricFilter) => void;
   setSearchQuery: (q: string) => void;
   addPlatform: (p: string) => void;
+  showToast: (message: string, undo?: () => void) => void;
+  dismissToast: () => void;
 }
 
-const today = new Date().toISOString().split('T')[0];
-const dec22  = `${new Date().getFullYear()}-12-22`;
-const dec28  = `${new Date().getFullYear()}-12-28`;
-
-const SAMPLE_ORDERS: Order[] = [
-  {
-    id: '1',
-    name: 'Running Shoes',
-    platform: 'Nike',
-    trackingNumber: '1Z999AA10123456784',
-    carrier: 'UPS',
-    status: 'out_for_delivery',
-    progress: 85,
-    estimatedDelivery: 'Today',
-    estimatedDeliveryDate: today,
-    lastUpdate: '2 hours ago',
-    statusHistory: [],
-    createdAt: new Date().toISOString(),
-    notes: '',
-  },
-  {
-    id: '2',
-    name: 'Mechanical Keyboard',
-    platform: 'Amazon',
-    trackingNumber: 'LX348295109CN',
-    carrier: 'DHL',
-    status: 'in_transit',
-    progress: 55,
-    estimatedDelivery: 'Dec 22',
-    estimatedDeliveryDate: dec22,
-    lastUpdate: '6 hours ago',
-    statusHistory: [],
-    createdAt: new Date().toISOString(),
-    notes: '',
-  },
-  {
-    id: '3',
-    name: 'Winter Jacket',
-    platform: 'Zara',
-    trackingNumber: 'ES456789012ES',
-    carrier: 'Correos',
-    status: 'processed',
-    progress: 10,
-    estimatedDelivery: 'Dec 28',
-    estimatedDeliveryDate: dec28,
-    lastUpdate: '1 day ago',
-    statusHistory: [],
-    createdAt: new Date().toISOString(),
-    notes: '',
-  },
-  {
-    id: '4',
-    name: 'Phone Case x3',
-    platform: 'AliExpress',
-    trackingNumber: 'YT2109876543',
-    carrier: 'Yanwen',
-    status: 'issue',
-    progress: 40,
-    estimatedDelivery: 'Unknown',
-    lastUpdate: '3 hours ago',
-    statusHistory: [],
-    createdAt: new Date().toISOString(),
-    notes: 'Customs hold at Madrid',
-  },
-  {
-    id: '5',
-    name: 'Coffee Maker',
-    platform: 'El Corte Inglés',
-    trackingNumber: 'RR123456785ES',
-    carrier: 'Correos',
-    status: 'delivered',
-    progress: 100,
-    estimatedDelivery: 'Dec 10',
-    lastUpdate: '5 days ago',
-    statusHistory: [],
-    createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
-    deliveredAt: new Date(Date.now() - 5 * 86400000).toISOString(),
-    isArchived: true,
-    archivedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
-  },
-];
-
-const SAMPLE_SUGGESTED: SuggestedOrder[] = [
-  {
-    id: 's1',
-    name: 'Wireless Earbuds',
-    platform: 'Apple',
-    trackingNumber: '774899256420',
-    source: 'email',
-    raw: 'Your order has shipped! Track: 774899256420',
-    createdAt: new Date().toISOString(),
-  },
-];
-
-const INITIAL_PLATFORMS = ['Amazon', 'AliExpress', 'Shein', 'Nike', 'Zara', 'Apple', 'eBay', 'El Corte Inglés'];
-
-/** Format ISO date → human display string */
-export function formatDeliveryDate(iso?: string): string {
-  if (!iso) return 'Unknown';
-  const d = new Date(iso);
-  const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
-  if (iso.startsWith(todayStr)) return 'Today';
-  const tomorrow = new Date(now);
-  tomorrow.setDate(now.getDate() + 1);
-  if (iso.startsWith(tomorrow.toISOString().split('T')[0])) return 'Tomorrow';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
+const INITIAL_PLATFORMS = ['Amazon', 'AliExpress', 'Shein', 'Temu', 'Nike', 'Zara', 'Apple', 'eBay', 'El Corte Inglés'];
 
 export const useOrdersStore = create<OrdersState>()(
   persist(
     (set, get) => ({
-      orders: SAMPLE_ORDERS,
-      suggested: SAMPLE_SUGGESTED,
+      orders: [],
+      suggested: [],
       platforms: INITIAL_PLATFORMS,
       statusFilter: 'all',
-      metricFilter: null,
       searchQuery: '',
+      toast: null,
 
       addOrder: (order) => {
         set((s) => ({ orders: [order, ...s.orders] }));
-        if (order.platform && order.platform !== 'Unknown') {
-          get().addPlatform(order.platform);
-        }
+        if (order.platform && order.platform !== 'Unknown') get().addPlatform(order.platform);
       },
 
       updateOrder: (id, patch) =>
         set((s) => ({
-          orders: s.orders.map((o) => (o.id === id ? { ...o, ...patch } : o)),
+          orders: s.orders.map((o) => {
+            if (o.id !== id) return o;
+            const next: Order = { ...o, ...patch, lastUpdate: new Date().toISOString() };
+            if (patch.status && patch.status !== o.status) {
+              next.progress = STATUS_PROGRESS[patch.status];
+              if (patch.status === 'delivered') {
+                next.deliveredAt = new Date().toISOString();
+              } else if (o.status === 'delivered') {
+                // Un-delivering brings it back to the active list
+                next.deliveredAt = undefined;
+                next.isArchived = false;
+                next.archivedAt = undefined;
+              }
+            }
+            return next;
+          }),
         })),
 
-      // Soft delete: move to history
       archiveOrder: (id) =>
         set((s) => ({
           orders: s.orders.map((o) =>
-            o.id === id
-              ? { ...o, isArchived: true, archivedAt: new Date().toISOString() }
-              : o
+            o.id === id ? { ...o, isArchived: true, archivedAt: new Date().toISOString() } : o
           ),
         })),
 
-      // Hard delete: permanent removal (only from history)
-      purgeOrder: (id) =>
-        set((s) => ({ orders: s.orders.filter((o) => o.id !== id) })),
+      restoreOrder: (id) =>
+        set((s) => ({
+          orders: s.orders.map((o) =>
+            o.id === id ? { ...o, isArchived: false, archivedAt: undefined } : o
+          ),
+        })),
+
+      purgeOrder: (id) => {
+        const { orders } = get();
+        const index = orders.findIndex((o) => o.id === id);
+        if (index === -1) return;
+        const removed = orders[index];
+        set({ orders: orders.filter((o) => o.id !== id) });
+        get().showToast(`Deleted “${removed.name}”`, () =>
+          set((s) => {
+            if (s.orders.some((o) => o.id === removed.id)) return s;
+            const next = [...s.orders];
+            next.splice(Math.min(index, next.length), 0, removed);
+            return { orders: next };
+          })
+        );
+      },
+
+      findByTracking: (trackingNumber, exceptId) => {
+        const n = normalizeTracking(trackingNumber);
+        return get().orders.find((o) => o.id !== exceptId && normalizeTracking(o.trackingNumber) === n);
+      },
 
       acceptSuggested: (id, patch) => {
-        const { suggested, orders } = get();
+        const { suggested } = get();
         const s = suggested.find((x) => x.id === id);
         if (!s) return;
+        const tracking = normalizeTracking(patch?.trackingNumber ?? s.trackingNumber);
+        const detected = validateTracking(tracking);
+        const now = new Date().toISOString();
         const newOrder: Order = {
           id: `order_${Date.now()}`,
-          name: patch?.name ?? s.name,
-          platform: patch?.platform ?? s.platform,
-          trackingNumber: patch?.trackingNumber ?? s.trackingNumber,
-          carrier: 'Unknown',
+          name: s.name,
+          platform: s.platform,
+          carrier: detected.carrier ?? 'Unknown',
           status: 'processed',
-          progress: 5,
-          lastUpdate: 'Just now',
+          progress: STATUS_PROGRESS.processed,
+          lastUpdate: now,
           statusHistory: [],
-          createdAt: new Date().toISOString(),
+          createdAt: now,
           notes: '',
           ...patch,
+          trackingNumber: detected.normalized || tracking,
         };
-        set({
-          orders: [newOrder, ...orders],
-          suggested: suggested.filter((x) => x.id !== id),
-        });
-        if (newOrder.platform && newOrder.platform !== 'Unknown') {
-          get().addPlatform(newOrder.platform);
-        }
+        set((st) => ({
+          orders: [newOrder, ...st.orders],
+          suggested: st.suggested.filter((x) => x.id !== id),
+        }));
+        if (newOrder.platform && newOrder.platform !== 'Unknown') get().addPlatform(newOrder.platform);
       },
 
       dismissSuggested: (id) =>
         set((s) => ({ suggested: s.suggested.filter((x) => x.id !== id) })),
 
-      setStatusFilter: (f) => set({ statusFilter: f, metricFilter: null }),
-      setMetricFilter: (f) => set({ metricFilter: f, statusFilter: 'all' }),
+      setStatusFilter: (f) => set({ statusFilter: f }),
       setSearchQuery: (q) => set({ searchQuery: q }),
 
       addPlatform: (p: string) =>
         set((s) => ({
-          platforms: s.platforms.includes(p) ? s.platforms : [...s.platforms, p],
+          platforms: s.platforms.some((x) => x.toLowerCase() === p.toLowerCase()) ? s.platforms : [...s.platforms, p],
         })),
+
+      showToast: (message, undo) => set({ toast: { id: Date.now(), message, undo } }),
+      dismissToast: () => set({ toast: null }),
     }),
-    { name: 'parceltrack-orders-v3' }
+    {
+      name: 'parceltrack-orders-v3',
+      // Rehydrated on the client after mount (see useHydrated) to avoid SSR mismatches.
+      skipHydration: true,
+      // Only data is saved; filters, search and toasts reset on reload.
+      partialize: (s) => ({ orders: s.orders, suggested: s.suggested, platforms: s.platforms }),
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<OrdersState>;
+        return {
+          ...current,
+          orders: Array.isArray(p.orders) ? p.orders : current.orders,
+          suggested: Array.isArray(p.suggested) ? p.suggested : current.suggested,
+          platforms: Array.isArray(p.platforms) ? p.platforms : current.platforms,
+        };
+      },
+    }
   )
 );

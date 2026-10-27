@@ -1,8 +1,9 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Package } from 'lucide-react';
+import { Plus, SearchX } from 'lucide-react';
 import { useOrdersStore } from '@/lib/store/orders';
+import { useHydrated } from '@/lib/store/useHydrated';
 import { Header } from '@/components/layout/Header';
 import { SearchBar } from '@/components/layout/SearchBar';
 import { FilterTabs } from '@/components/layout/FilterTabs';
@@ -10,187 +11,202 @@ import { BottomNav } from '@/components/layout/BottomNav';
 import { AddOrderModal } from '@/components/layout/AddOrderModal';
 import { OrderCard } from '@/components/orders/OrderCard';
 import { SuggestionCard } from '@/components/orders/SuggestionCard';
-import { ActiveTab, MetricFilter } from '@/types';
-import { BRAND } from '@/lib/utils/status';
+import { EditOrderModal } from '@/components/orders/EditOrderModal';
+import { Toast } from '@/components/ui/Toast';
+import { ActiveTab, Order, StatusFilter } from '@/types';
+import { isDueToday, daysFromToday } from '@/lib/utils/dates';
+import { normalizeTracking, parseTrackingInput, validateTracking } from '@/lib/utils/validation';
+
+const isHistory = (o: Order) => !!o.isArchived || o.status === 'delivered';
+
+/** Active list order: what needs attention first, then by ETA, then newest. */
+function activeRank(o: Order): number {
+  if (o.status === 'out_for_delivery') return 0;
+  if (o.status === 'issue') return 1;
+  if (isDueToday(o)) return 2;
+  return 3;
+}
+function compareActive(a: Order, b: Order): number {
+  const r = activeRank(a) - activeRank(b);
+  if (r) return r;
+  const ea = a.estimatedDeliveryDate ? daysFromToday(a.estimatedDeliveryDate) : Infinity;
+  const eb = b.estimatedDeliveryDate ? daysFromToday(b.estimatedDeliveryDate) : Infinity;
+  if (ea !== eb) return ea - eb;
+  return b.createdAt.localeCompare(a.createdAt);
+}
+const historyDate = (o: Order) => o.deliveredAt ?? o.archivedAt ?? o.createdAt;
+
+function matchesFilter(o: Order, f: StatusFilter): boolean {
+  if (f === 'all') return true;
+  if (f === 'today') return isDueToday(o);
+  return o.status === f;
+}
 
 export default function HomePage() {
-  const { orders, suggested, statusFilter, metricFilter, setMetricFilter, setStatusFilter, searchQuery } = useOrdersStore();
+  const hydrated = useHydrated();
+  const { orders, suggested, statusFilter, searchQuery, setSearchQuery } = useOrdersStore();
   const [activeTab, setActiveTab] = useState<ActiveTab>('list');
   const [addOpen, setAddOpen] = useState(false);
+  const [addPrefill, setAddPrefill] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const handleTabChange = (tab: ActiveTab) => {
-    if (tab === 'add') { setAddOpen(true); return; }
-    setActiveTab(tab);
-  };
+  const activeOrders = useMemo(() => orders.filter(o => !isHistory(o)).sort(compareActive), [orders]);
+  const historyOrders = useMemo(
+    () => orders.filter(isHistory).sort((a, b) => historyDate(b).localeCompare(historyDate(a))),
+    [orders]
+  );
 
-  // Active = not archived, not delivered (unless explicitly archived)
-  const activeOrders  = orders.filter(o => !o.isArchived && o.status !== 'delivered');
-  const historyOrders = orders.filter(o => o.isArchived || o.status === 'delivered');
+  const counts = useMemo(() => {
+    const keys: StatusFilter[] = ['all', 'today', 'processed', 'in_transit', 'out_for_delivery', 'issue'];
+    return Object.fromEntries(keys.map(k => [k, activeOrders.filter(o => matchesFilter(o, k)).length])) as Record<StatusFilter, number>;
+  }, [activeOrders]);
 
-  const activeCount = activeOrders.length;
-  const issueCount  = activeOrders.filter(o => o.status === 'issue').length;
-  const todayCount  = activeOrders.filter(o => o.estimatedDelivery === 'Today' || o.status === 'out_for_delivery').length;
+  const inHistory = activeTab === 'history';
 
-  const handleMetricClick = (metric: MetricFilter) => {
-    if (metricFilter === metric) {
-      setMetricFilter(null);
-    } else {
-      setMetricFilter(metric);
-      setStatusFilter('all');
-    }
-  };
-
-  const METRIC_CARDS = [
-    { id: 'active' as MetricFilter, label: 'Active',  value: activeCount, color: BRAND.primary, activeBg: BRAND.primaryBg, activeBorder: BRAND.primaryBorder },
-    { id: 'issues' as MetricFilter, label: 'Issues',  value: issueCount,  color: '#EF4444', activeBg: 'rgba(239,68,68,0.1)', activeBorder: 'rgba(239,68,68,0.25)' },
-    { id: 'today'  as MetricFilter, label: 'Today',   value: todayCount,  color: '#F97316', activeBg: 'rgba(249,115,22,0.1)', activeBorder: 'rgba(249,115,22,0.25)' },
-  ];
-
-  const filteredOrders = useMemo(() => {
-    let list = activeTab === 'history' ? historyOrders : activeOrders;
-
-    if (metricFilter && activeTab !== 'history') {
-      if (metricFilter === 'issues') list = list.filter(o => o.status === 'issue');
-      else if (metricFilter === 'today') list = list.filter(o => o.estimatedDelivery === 'Today' || o.status === 'out_for_delivery');
-      // 'active' = already the full activeOrders list
-    } else if (statusFilter !== 'all' && activeTab !== 'history') {
-      list = list.filter(o => o.status === statusFilter);
-    }
-
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
+  const visible = useMemo(() => {
+    let list = inHistory ? historyOrders : activeOrders.filter(o => matchesFilter(o, statusFilter));
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      const code = normalizeTracking(q);
       list = list.filter(o =>
         o.name.toLowerCase().includes(q) ||
         o.platform.toLowerCase().includes(q) ||
-        o.trackingNumber.toLowerCase().includes(q) ||
-        o.carrier.toLowerCase().includes(q)
+        o.carrier.toLowerCase().includes(q) ||
+        (o.notes ?? '').toLowerCase().includes(q) ||
+        (code.length >= 3 && normalizeTracking(o.trackingNumber).includes(code))
       );
     }
     return list;
-  }, [orders, activeTab, statusFilter, metricFilter, searchQuery]);
+  }, [inHistory, historyOrders, activeOrders, statusFilter, searchQuery]);
+
+  // A search that looks like an untracked number offers to track it
+  const searchAsTracking = useMemo(() => {
+    const code = parseTrackingInput(searchQuery);
+    if (code.length < 8 || !/\d/.test(code)) return null;
+    const v = validateTracking(code);
+    return v.confidence === 'unknown' && code.length < 10 ? null : v.normalized;
+  }, [searchQuery]);
+
+  const openAdd = useCallback((prefill = '') => {
+    setAddPrefill(prefill);
+    setAddOpen(true);
+  }, []);
+
+  const handleTabChange = (tab: ActiveTab) => {
+    if (tab === 'add') { openAdd(); return; }
+    setActiveTab(tab);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const selected = selectedId ? orders.find(o => o.id === selectedId) ?? null : null;
+  const closeSelected = useCallback(() => setSelectedId(null), []);
+
+  const subtitle = inHistory
+    ? `${historyOrders.length} delivered or archived`
+    : activeOrders.length === 0
+      ? undefined
+      : [
+          `${activeOrders.length} on the way`,
+          counts.today ? `${counts.today} today` : '',
+          counts.issue ? `${counts.issue} with issues` : '',
+        ].filter(Boolean).join(' · ');
+
+  const noOrdersAtAll = !inHistory && activeOrders.length === 0 && suggested.length === 0 && !searchQuery;
 
   return (
-    <div className="min-h-dvh flex flex-col" style={{ background: 'var(--bg-base)' }}>
-      <Header title="ParcelTrack" />
+    <div className="min-h-dvh mx-auto w-full max-w-xl">
+      <Header title={inHistory ? 'History' : 'Tracking'} subtitle={hydrated ? subtitle : undefined} />
 
-      <div className="flex-1 overflow-hidden flex flex-col">
-        {/* Controls */}
-        <div className="px-4 pb-3 space-y-3">
-          <SearchBar onAdd={() => setAddOpen(true)} />
-
-          {/* Metric filter cards */}
-          <div className="flex gap-2">
-            {METRIC_CARDS.map(card => {
-              const isActive = metricFilter === card.id;
-              return (
-                <button
-                  key={card.id}
-                  onClick={() => handleMetricClick(card.id)}
-                  className="flex-1 rounded-xl px-3 py-2.5 text-center transition-all duration-200 active:scale-95"
-                  style={{
-                    background: isActive ? card.activeBg : 'var(--bg-card)',
-                    border: `1px solid ${isActive ? card.activeBorder : 'var(--border)'}`,
-                    boxShadow: isActive ? `0 0 14px ${card.activeBg}` : undefined,
-                  }}
-                >
-                  <p className="text-lg font-bold leading-none" style={{ color: isActive ? card.color : 'var(--text-primary)' }}>
-                    {card.value}
-                  </p>
-                  <p className="text-[10px] uppercase tracking-wider mt-1 font-medium" style={{ color: isActive ? card.color : 'var(--text-muted)' }}>
-                    {card.label}
-                  </p>
-                </button>
-              );
-            })}
+      {!hydrated ? (
+        <div className="px-4 space-y-3" aria-busy="true" aria-label="Loading">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="card h-[124px] animate-pulse" style={{ opacity: 1 - i * 0.25 }} />
+          ))}
+        </div>
+      ) : noOrdersAtAll ? (
+        <EmptyStart onAdd={() => openAdd()} />
+      ) : (
+        <main className="px-4 pb-36">
+          <div className="sticky z-10 -mx-4 px-4 pb-3 pt-1 space-y-3" style={{ top: 'env(safe-area-inset-top, 0px)', background: 'linear-gradient(var(--bg-base) 80%, transparent)' }}>
+            <SearchBar placeholder={inHistory ? 'Search history' : 'Search, or paste a tracking number'} />
+            {!inHistory && activeOrders.length > 0 && <FilterTabs counts={counts} />}
           </div>
 
-          {activeTab === 'list' && !metricFilter && <FilterTabs />}
-          {activeTab === 'list' && metricFilter && (
-            <div className="flex items-center gap-2">
-              <div
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium"
-                style={{
-                  background: METRIC_CARDS.find(c => c.id === metricFilter)?.activeBg,
-                  border: `1px solid ${METRIC_CARDS.find(c => c.id === metricFilter)?.activeBorder}`,
-                  color: METRIC_CARDS.find(c => c.id === metricFilter)?.color,
-                }}
-              >
-                Filtered: {metricFilter}
-              </div>
-              <button
-                onClick={() => setMetricFilter(null)}
-                className="text-xs px-2 py-1 rounded-lg"
-                style={{ color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}
-              >
-                Clear
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Scrollable list */}
-        <div className="flex-1 scroll-area px-4 pb-32 space-y-3">
-          {/* Suggestions (active tab only) */}
-          {activeTab === 'list' && suggested.length > 0 && (
-            <AnimatePresence>
-              {suggested.map(s => <SuggestionCard key={s.id} suggestion={s} />)}
+          <ul className="space-y-3">
+            <AnimatePresence initial={false}>
+              {!inHistory && !searchQuery && suggested.map(s => <SuggestionCard key={s.id} suggestion={s} />)}
             </AnimatePresence>
-          )}
-
-          {/* Section header */}
-          <div className="flex items-center gap-2 py-0.5">
-            <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
-              {activeTab === 'history'
-                ? `${filteredOrders.length} archived`
-                : `${filteredOrders.length} shipment${filteredOrders.length !== 1 ? 's' : ''}`}
-            </p>
-            <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
-            {activeTab === 'history' && (
-              <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                Delete removes permanently
-              </p>
-            )}
-          </div>
-
-          {filteredOrders.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-              className="flex flex-col items-center justify-center py-16 gap-4"
-            >
-              <div
-                className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}
-              >
-                <Package size={24} style={{ color: 'var(--text-muted)' }} />
-              </div>
-              <div className="text-center">
-                <p className="font-semibold text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  {activeTab === 'history' ? 'No archived orders' : 'No shipments here'}
-                </p>
-                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                  {activeTab === 'history'
-                    ? 'Archived and delivered orders appear here'
-                    : 'Tap + to start tracking a package'}
-                </p>
-              </div>
-            </motion.div>
-          ) : (
-            <div className="space-y-3">
-              {filteredOrders.map((order, i) => (
-                <OrderCard
-                  key={order.id}
-                  order={order}
-                  index={i}
-                  inHistory={activeTab === 'history'}
-                />
+            <AnimatePresence initial={false} mode="popLayout">
+              {visible.map((order, i) => (
+                <OrderCard key={order.id} order={order} index={i} onOpen={setSelectedId} />
               ))}
-            </div>
-          )}
-        </div>
-      </div>
+            </AnimatePresence>
+          </ul>
 
-      <BottomNav active={activeTab} onChange={handleTabChange} />
-      <AddOrderModal open={addOpen} onClose={() => setAddOpen(false)} />
+          {visible.length === 0 && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center text-center py-14 gap-3">
+              <SearchX size={28} style={{ color: 'var(--text-muted)' }} aria-hidden />
+              <p className="font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                {searchQuery ? 'No matches' : inHistory ? 'History is empty' : 'Nothing in this filter'}
+              </p>
+              <p className="text-sm max-w-[280px]" style={{ color: 'var(--text-muted)' }}>
+                {searchQuery
+                  ? inHistory ? 'Try another word, or search in Tracking.' : 'Try another word or number.'
+                  : inHistory ? 'Delivered and archived orders land here.' : 'Pick another filter above.'}
+              </p>
+              {searchQuery && !inHistory && searchAsTracking && (
+                <button
+                  type="button"
+                  className="btn btn-primary mt-2"
+                  onClick={() => { openAdd(searchAsTracking); setSearchQuery(''); }}
+                >
+                  <Plus size={16} /> Track <span className="mono">{searchAsTracking}</span>
+                </button>
+              )}
+            </motion.div>
+          )}
+        </main>
+      )}
+
+      <BottomNav active={activeTab} onChange={handleTabChange} historyCount={hydrated ? historyOrders.length : 0} />
+      <AddOrderModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        initialTracking={addPrefill}
+        onOpenExisting={id => {
+          const o = orders.find(x => x.id === id);
+          if (o) setActiveTab(isHistory(o) ? 'history' : 'list');
+          setSelectedId(id);
+        }}
+      />
+      <EditOrderModal order={selected} onClose={closeSelected} />
+      <Toast />
     </div>
+  );
+}
+
+function EmptyStart({ onAdd }: { onAdd: () => void }) {
+  return (
+    <motion.main
+      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+      className="flex flex-col items-center text-center px-8 pt-16 pb-36"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/icons/icon-512.png"
+        alt=""
+        width={112}
+        height={112}
+        className="rounded-[28px]"
+        style={{ boxShadow: '0 18px 50px rgba(47,111,228,0.35)', outline: '1px solid rgba(255,255,255,0.08)', outlineOffset: -1 }}
+      />
+      <h2 className="text-xl font-bold mt-7" style={{ color: 'var(--text-primary)' }}>Nothing on the way</h2>
+      <p className="text-[15px] mt-2 max-w-[300px]" style={{ color: 'var(--text-secondary)' }}>
+        Add a tracking number, a carrier link or the whole shipping email. The carrier is detected for you.
+      </p>
+      <button type="button" onClick={onAdd} className="btn btn-primary mt-7" style={{ minHeight: 50, padding: '0 22px' }}>
+        <Plus size={18} /> Track a package
+      </button>
+    </motion.main>
   );
 }

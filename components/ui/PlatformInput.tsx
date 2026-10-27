@@ -1,122 +1,130 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
-import { Building2, Check } from 'lucide-react';
+import { useState, useRef, useEffect, useId } from 'react';
+import { Building2, Check, Truck } from 'lucide-react';
 import { useOrdersStore } from '@/lib/store/orders';
+import { COMMON_CARRIERS } from '@/lib/tracking/carriers';
 
-interface Props {
+interface ComboProps {
   value: string;
   onChange: (v: string) => void;
+  options: string[];
   placeholder?: string;
+  icon?: React.ReactNode;
+  id?: string;
 }
 
-export function PlatformInput({ value, onChange, placeholder = 'e.g. Amazon, ZARA, Shopify Store...' }: Props) {
-  const { platforms, addPlatform } = useOrdersStore();
+/** Text input with a filtered suggestion list. Free text is always allowed. */
+export function ComboInput({ value, onChange, options, placeholder, icon, id }: ComboProps) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState(value);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [highlight, setHighlight] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
-  const filtered = query.trim()
-    ? platforms.filter(p => p.toLowerCase().includes(query.toLowerCase()) && p.toLowerCase() !== query.toLowerCase())
-    : platforms.slice(0, 8);
+  const q = value.trim().toLowerCase();
+  const filtered = (q
+    ? options.filter(p => p.toLowerCase().includes(q) && p.toLowerCase() !== q)
+    : options
+  ).slice(0, 6);
 
-  // Sync value → query when value changes externally
-  useEffect(() => { setQuery(value); }, [value]);
-
-  // Close on outside click
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+    const handler = (e: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('pointerdown', handler);
+    return () => document.removeEventListener('pointerdown', handler);
   }, []);
 
   const select = (p: string) => {
-    setQuery(p);
     onChange(p);
     setOpen(false);
+    setHighlight(-1);
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setQuery(e.target.value);
-    onChange(e.target.value);
-    setOpen(true);
-  };
-
-  const handleBlur = () => {
-    // Small delay so click on suggestion registers first
-    setTimeout(() => setOpen(false), 150);
-    // Save new custom platform
-    if (query.trim() && !platforms.includes(query.trim())) {
-      addPlatform(query.trim());
-    }
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open || filtered.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => (h + 1) % filtered.length); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(h => (h <= 0 ? filtered.length : h) - 1); }
+    else if (e.key === 'Enter' && highlight >= 0) { e.preventDefault(); select(filtered[highlight]); }
+    else if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
   };
 
   return (
     <div ref={containerRef} className="relative">
-      <div
-        className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
-        style={{
-          background: 'rgba(255,255,255,0.04)',
-          border: `1px solid ${open ? 'rgba(52,71,170,0.4)' : 'var(--border)'}`,
-          boxShadow: open ? '0 0 0 1px rgba(52,71,170,0.2)' : undefined,
-          transition: 'border-color 0.15s, box-shadow 0.15s',
-        }}
-      >
-        <Building2 size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+      <div className="field">
+        <span style={{ color: 'var(--text-muted)', display: 'flex' }} aria-hidden>{icon}</span>
         <input
-          ref={inputRef}
-          value={query}
-          onChange={handleChange}
+          id={id}
+          value={value}
+          onChange={e => { onChange(e.target.value); setOpen(true); setHighlight(-1); }}
           onFocus={() => setOpen(true)}
-          onBlur={handleBlur}
+          onKeyDown={onKeyDown}
           placeholder={placeholder}
-          className="flex-1 bg-transparent outline-none text-sm"
-          style={{ color: 'var(--text-primary)', minWidth: 0 }}
           autoComplete="off"
+          role="combobox"
+          aria-expanded={open && filtered.length > 0}
+          aria-controls={listId}
+          aria-autocomplete="list"
         />
       </div>
 
-      {/* Dropdown */}
       {open && filtered.length > 0 && (
         <div
-          className="absolute left-0 right-0 mt-1 rounded-xl overflow-hidden z-50 shadow-xl"
-          style={{
-            background: '#1C1C1F',
-            border: '1px solid var(--border)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-          }}
+          id={listId}
+          role="listbox"
+          className="absolute left-0 right-0 mt-1.5 rounded-2xl overflow-hidden z-20 py-1"
+          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)', boxShadow: '0 12px 32px rgba(0,0,0,0.5)' }}
         >
-          {filtered.map(p => (
+          {filtered.map((p, i) => (
             <button
+              type="button"
+              role="option"
+              aria-selected={i === highlight}
               key={p}
-              onMouseDown={() => select(p)}
-              className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-left transition-colors"
-              style={{ color: 'var(--text-primary)' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(52,71,170,0.12)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              onPointerDown={e => e.preventDefault()}
+              onClick={() => select(p)}
+              className="w-full flex items-center justify-between px-4 min-h-[44px] text-[15px] text-left"
+              style={{
+                color: 'var(--text-primary)',
+                background: i === highlight ? 'var(--brand-bg)' : 'transparent',
+              }}
+              onMouseEnter={() => setHighlight(i)}
             >
               {p}
-              {p === value && <Check size={12} style={{ color: '#3447AA' }} />}
+              {p === value && <Check size={14} style={{ color: 'var(--brand)' }} />}
             </button>
           ))}
-          {query.trim() && !platforms.includes(query.trim()) && (
-            <button
-              onMouseDown={() => select(query.trim())}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left border-t"
-              style={{ borderColor: 'var(--border)', color: '#3447AA' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(52,71,170,0.08)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-            >
-              <span style={{ fontSize: '11px', opacity: 0.7 }}>Add</span>
-              <span className="font-semibold">"{query.trim()}"</span>
-            </button>
-          )}
         </div>
       )}
     </div>
+  );
+}
+
+export function PlatformInput({ value, onChange, id }: { value: string; onChange: (v: string) => void; id?: string }) {
+  const { platforms } = useOrdersStore();
+  return (
+    <ComboInput
+      id={id}
+      value={value}
+      onChange={onChange}
+      options={platforms}
+      placeholder="Amazon, Zara, AliExpress…"
+      icon={<Building2 size={16} />}
+    />
+  );
+}
+
+export function CarrierInput({ value, onChange, suggested = [], id }: {
+  value: string; onChange: (v: string) => void; suggested?: string[]; id?: string;
+}) {
+  const options = [...new Set([...suggested, ...COMMON_CARRIERS])];
+  return (
+    <ComboInput
+      id={id}
+      value={value}
+      onChange={onChange}
+      options={options}
+      placeholder="Detected automatically"
+      icon={<Truck size={16} />}
+    />
   );
 }

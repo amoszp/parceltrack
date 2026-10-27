@@ -1,60 +1,29 @@
 import { OrderStatus } from '@/types';
 
-// ─── Brand Palette (v2) ────────────────────────────────────────────────────
+// ─── Brand Palette (v3, taken from the app icon) ───────────────────────────
 export const BRAND = {
-  primary:   '#3447AA',   // Royal Blue
-  primaryBg: 'rgba(52,71,170,0.12)',
-  primaryBorder: 'rgba(52,71,170,0.3)',
-  tint:      '#FBEAEB',   // Soft Warm Tint
-  base:      '#0D0D0E',
+  primary:       '#2F6FE4',   // icon blue, lifted for contrast on dark
+  primaryBg:     'rgba(47,111,228,0.14)',
+  primaryBorder: 'rgba(47,111,228,0.34)',
+  accent:        '#F2A23C',   // calico orange
+  base:          '#0B0D12',
 };
 
-// Status config — colours kept for semantic clarity, but progress bars are unified
-export const STATUS_CONFIG: Record<
-  OrderStatus,
-  { label: string; color: string; bg: string; border: string; glow: string; icon: string }
-> = {
-  processed: {
-    label: 'Processing',
-    color: '#3447AA',
-    bg: 'rgba(52,71,170,0.1)',
-    border: 'rgba(52,71,170,0.25)',
-    glow: 'rgba(52,71,170,0.15)',
-    icon: 'package',
-  },
-  in_transit: {
-    label: 'In Transit',
-    color: '#FBBF24',
-    bg: 'rgba(251,191,36,0.1)',
-    border: 'rgba(251,191,36,0.25)',
-    glow: 'rgba(251,191,36,0.15)',
-    icon: 'truck',
-  },
-  out_for_delivery: {
-    label: 'Out for Delivery',
-    color: '#F97316',
-    bg: 'rgba(249,115,22,0.1)',
-    border: 'rgba(249,115,22,0.25)',
-    glow: 'rgba(249,115,22,0.25)',
-    icon: 'map-pin',
-  },
-  delivered: {
-    label: 'Delivered',
-    color: '#10B981',
-    bg: 'rgba(16,185,129,0.1)',
-    border: 'rgba(16,185,129,0.25)',
-    glow: 'rgba(16,185,129,0.15)',
-    icon: 'check-circle',
-  },
-  issue: {
-    label: 'Issue',
-    color: '#EF4444',
-    bg: 'rgba(239,68,68,0.1)',
-    border: 'rgba(239,68,68,0.25)',
-    glow: 'rgba(239,68,68,0.2)',
-    icon: 'alert-triangle',
-  },
+const tone = (rgb: string) => ({
+  color: `rgb(${rgb})`,
+  bg: `rgba(${rgb},0.12)`,
+  border: `rgba(${rgb},0.28)`,
+});
+
+export const STATUS_CONFIG: Record<OrderStatus, { label: string; short: string; color: string; bg: string; border: string }> = {
+  processed:        { label: 'Processing',       short: 'Processing', ...tone('148,163,192') },
+  in_transit:       { label: 'In transit',       short: 'In transit', ...tone('99,155,255') },
+  out_for_delivery: { label: 'Out for delivery', short: 'Out today',  ...tone('242,162,60') },
+  delivered:        { label: 'Delivered',        short: 'Delivered',  ...tone('52,195,143') },
+  issue:            { label: 'Issue',            short: 'Issue',      ...tone('240,97,109') },
 };
+
+export const STATUS_ORDER: OrderStatus[] = ['processed', 'in_transit', 'out_for_delivery', 'delivered', 'issue'];
 
 export const STATUS_PROGRESS: Record<OrderStatus, number> = {
   processed: 10,
