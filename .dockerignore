@@ -1,0 +1,12 @@
+.git
+.github
+.claude
+**/node_modules
+.next
+data
+**/.env
+**/.env.*
+!.env.example
+tests
+*.tsbuildinfo
+Parceltrack_icon.png

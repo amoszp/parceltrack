@@ -1,6 +1,6 @@
 # ParcelTrack
 
-A shipment tracking PWA built with Next.js 16, Tailwind CSS 4, Zustand and Framer Motion. Add it to your iOS or Android home screen and keep every parcel, from any store and any carrier, in one list.
+A shipment tracking PWA built with Next.js 16, Tailwind CSS 4, Zustand and Framer Motion, with a small SQLite backend. Add it to your iOS or Android home screen and keep every parcel, from any store and any carrier, in one list that follows you across devices.
 
 ---
 
@@ -14,7 +14,7 @@ A shipment tracking PWA built with Next.js 16, Tailwind CSS 4, Zustand and Frame
 - **Smart list:** out-for-delivery and issues first, then by expected delivery date. Filters for *Arriving today*, *Issues* and each status.
 - **History:** delivered and archived orders, newest first.
 - **Search:** by name, store, carrier, notes or tracking number (spaces and dashes ignored). `Ctrl/⌘ + K` focuses it. Searching for a number you don't track yet offers to track it.
-- **Offline-first:** everything is stored in the browser (`localStorage`).
+- **Accounts and sync:** sign in or create an account; orders are stored per user on the server (SQLite) and reload whenever the app comes back to the foreground. Orders saved in the browser by an older version are copied into an empty account once, and the browser copy is kept as a backup.
 
 ---
 
@@ -27,21 +27,28 @@ parceltrack/
 │   ├── layout.tsx              # Root layout + PWA meta
 │   ├── globals.css             # Design tokens, buttons, fields
 │   ├── icon.png / apple-icon.png / favicon.ico
-│   └── api/track/route.ts      # Server-side validation + live lookup
+│   └── api/                    # Thin route files → lib/server/handlers.ts
+│       ├── auth/{login,signup,logout,me}
+│       ├── orders, orders/[id]  # list · create/replace · delete
+│       ├── import               # one-time copy of browser orders
+│       └── track                # validation + live lookup
 ├── components/
 │   ├── layout/                 # Header, SearchBar, FilterTabs, BottomNav, AddOrderModal
 │   ├── orders/                 # OrderCard, EditOrderModal (details + edit), SuggestionCard
-│   └── ui/                     # Sheet, StatusBadge, TrackingHint, PlatformInput, Toast
+│   ├── ui/                     # Sheet, StatusBadge, TrackingHint, PlatformInput, Toast
+│   └── auth/                   # Login, AccountSheet
 ├── lib/
-│   ├── store/orders.ts         # Zustand store (persisted to localStorage)
-│   ├── store/useHydrated.ts    # Client-side rehydration
-│   ├── tracking/api.ts         # Live tracking provider (AfterShip)
+│   ├── api.ts                  # Browser → API client
+│   ├── server/                 # accounts client, SQLite store, API handlers
+│   ├── store/orders.ts         # Zustand store, synced to the server
+│   ├── store/useSession.ts     # Sign-in check + reload on focus
+│   ├── tracking/api.ts         # Live tracking providers (17TRACK, AfterShip)
 │   ├── tracking/carriers.ts    # Carrier tracking-page links
 │   └── utils/
 │       ├── validation.ts       # Normalise, detect carrier, verify check digits, parse pasted input
 │       ├── dates.ts            # Local-date ETA labels
 │       └── status.ts           # Status palette and config
-├── tests/validation.test.ts    # Tracking-number tests (node:test)
+├── tests/                      # node:test: tracking logic, API/store, providers
 ├── types/index.ts
 └── public/
     ├── manifest.json
@@ -82,15 +89,23 @@ Verify check digit where the format has one
 
 ---
 
+## Accounts
+
+Sign-in is delegated to a separate accounts service reached over a private network (`ACCOUNTS_URL`, authenticated with `ACCOUNTS_SERVICE_TOKEN`). It exposes `POST /v1/login`, `/v1/signup`, `/v1/verify` and `/v1/logout`; the app keeps the session token in an `HttpOnly`, `SameSite=Lax` cookie. Every API route except login/sign-up requires a session, mutations only accept JSON bodies, and each user only ever sees their own orders.
+
 ## Live tracking (optional)
 
-Without an API key the app works fully with manual status. To fetch live status when adding an order, set an [AfterShip](https://www.aftership.com/docs/tracking/3.x/quickstart) key in `.env.local`:
+Without an API key the app works fully with manual status. To fetch live status when adding an order:
 
 ```env
-TRACKING_API_KEY=your_aftership_api_key
+TRACKING_PROVIDER=17track        # or aftership (default)
+TRACKING_API_KEY=your_key
 ```
 
-`lib/tracking/api.ts` is the single place to swap in another provider (17TRACK, Ship24, a self-hosted Karrio…). It must return `live: true` with a status, an optional `estimatedDeliveryDate` (`YYYY-MM-DD`) and events.
+- **17TRACK** (`17track`): the number is registered once (one quota) and then read with `gettrackinfo`.
+- **AfterShip** (`aftership`): creates a tracking and maps its checkpoints.
+
+`lib/tracking/api.ts` is the single place to add another provider. It must return `live: true` with a status, an optional `estimatedDeliveryDate` (`YYYY-MM-DD`) and events.
 
 ---
 
@@ -98,9 +113,22 @@ TRACKING_API_KEY=your_aftership_api_key
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000
-npm test           # tracking-number tests
-npm run build      # production build
+cp .env.example .env.local   # ACCOUNTS_URL, ACCOUNTS_SERVICE_TOKEN, COOKIE_SECURE=false, DB_PATH=./data/parceltrack.db
+npm run dev                  # http://localhost:3000
+npm test                     # all tests
+npm run build                # production build (standalone output)
 ```
+
+## Deploying with Docker
+
+GitHub Actions builds `ghcr.io/<owner>/parceltrack` on every push to `main` (`.github/workflows/deploy.yml`). On the host:
+
+```bash
+cp .env.example .env         # fill in the accounts token; never commit it
+mkdir -p data
+docker compose pull && docker compose up -d
+```
+
+`docker-compose.yml` publishes the app on host port 1109, keeps the database in `./data`, and joins the external `accounts` Docker network where the accounts service runs.
 
 Open the site in Safari (iOS) or Chrome (Android) and use **Add to Home Screen** for the standalone app.

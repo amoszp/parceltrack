@@ -3,7 +3,9 @@ import { useState, useMemo, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Plus, SearchX } from 'lucide-react';
 import { useOrdersStore } from '@/lib/store/orders';
-import { useHydrated } from '@/lib/store/useHydrated';
+import { useSession } from '@/lib/store/useSession';
+import { Login, Offline } from '@/components/auth/Login';
+import { AccountSheet } from '@/components/auth/AccountSheet';
 import { Header } from '@/components/layout/Header';
 import { SearchBar } from '@/components/layout/SearchBar';
 import { FilterTabs } from '@/components/layout/FilterTabs';
@@ -43,8 +45,10 @@ function matchesFilter(o: Order, f: StatusFilter): boolean {
 }
 
 export default function HomePage() {
-  const hydrated = useHydrated();
-  const { orders, suggested, statusFilter, searchQuery, setSearchQuery } = useOrdersStore();
+  const session = useSession();
+  const hydrated = session.phase === 'ready';
+  const { orders, suggested, statusFilter, searchQuery, setSearchQuery, start, signOut } = useOrdersStore();
+  const [accountOpen, setAccountOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('list');
   const [addOpen, setAddOpen] = useState(false);
   const [addPrefill, setAddPrefill] = useState('');
@@ -111,11 +115,20 @@ export default function HomePage() {
           counts.issue ? `${counts.issue} with issues` : '',
         ].filter(Boolean).join(' · ');
 
+  if (session.phase === 'login') return <Login onSignedIn={start} />;
+  if (session.phase === 'offline') return <Offline onRetry={start} />;
+  const user = session.phase === 'ready' ? session.user : null;
+
   const noOrdersAtAll = !inHistory && activeOrders.length === 0 && suggested.length === 0 && !searchQuery;
 
   return (
     <div className="min-h-dvh mx-auto w-full max-w-xl">
-      <Header title={inHistory ? 'History' : 'Tracking'} subtitle={hydrated ? subtitle : undefined} />
+      <Header
+        title={inHistory ? 'History' : 'Tracking'}
+        subtitle={hydrated ? subtitle : undefined}
+        accountInitial={user ? (user.displayName || user.username).charAt(0).toUpperCase() : undefined}
+        onAccount={() => setAccountOpen(true)}
+      />
 
       {!hydrated ? (
         <div className="px-4 space-y-3" aria-busy="true" aria-label="Loading">
@@ -181,6 +194,14 @@ export default function HomePage() {
       />
       <EditOrderModal order={selected} onClose={closeSelected} />
       <Toast />
+      {user && (
+        <AccountSheet
+          open={accountOpen}
+          user={user}
+          onClose={() => setAccountOpen(false)}
+          onSignOut={() => { setAccountOpen(false); signOut(); }}
+        />
+      )}
     </div>
   );
 }
